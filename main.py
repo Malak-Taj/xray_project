@@ -196,7 +196,7 @@ def load_models():
 # -------------------------------
 # PREDICTION FUNCTION
 # -------------------------------
-def predict_image(img_array):
+def predict_image(img_array, seg_model, cbam_model):
     """
     Preprocess with U-Net and predict with CBAM model.
     """
