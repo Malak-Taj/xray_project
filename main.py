@@ -236,8 +236,18 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
     img_array = np.array(image)
 
-    # Load models
-    seg_model, cbam_model = load_models()
+    @st.cache_resource
+    def load_models():
+        # U-Net
+        seg_model = unet_small()
+        seg_model.load_weights("U_net/cxr_reg_weights.best.hdf5")
+
+        # CBAM
+        cbam_model = build_cbam_model()  # build architecture
+        cbam_model.load_weights("cbam/model_cbam.hdf5")  # load weights
+
+        return seg_model, cbam_model
+
 
     # Prediction
     pred_label, confidence, labels, probs = predict_image(img_array, seg_model, cbam_model)
