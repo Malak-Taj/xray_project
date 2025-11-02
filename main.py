@@ -1,11 +1,10 @@
 import streamlit as st
 from PIL import Image
 import numpy as np
-import io
 import time
 import cv2
 import tensorflow as tf
-from tensorflow.keras import layers, models
+from tensorflow.keras import layers, models, Model, Input
 from tensorflow.keras.layers import *
 
 # -------------------------------
@@ -47,11 +46,6 @@ progress_bar = st.sidebar.progress(0)
 download_button = st.sidebar.empty()
 
 # -------------------------------
-import tensorflow as tf
-from tensorflow.keras import layers, models, Model, Input
-from tensorflow.keras.layers import *
-
-# -------------------------------
 # CBAM ARCHITECTURE FUNCTION
 # -------------------------------
 def cbam_block(input_feature, ratio=8):
@@ -79,7 +73,6 @@ def build_cbam_model(input_shape=(512,512,3), n_classes=3):
     img_input = Input(shape=input_shape)
     x = Resizing(224, 224)(img_input)
     x = BatchNormalization()(x)
-
     # Block 1
     x = Conv2D(32,3,padding='same', kernel_initializer='he_normal')(x)
     x = BatchNormalization()(x)
@@ -89,7 +82,6 @@ def build_cbam_model(input_shape=(512,512,3), n_classes=3):
     x = ReLU()(x)
     x = cbam_block(x)
     x = MaxPool2D()(x)
-
     # Block 2
     x = Conv2D(64,3,padding='same', kernel_initializer='he_normal')(x)
     x = BatchNormalization()(x)
@@ -98,16 +90,13 @@ def build_cbam_model(input_shape=(512,512,3), n_classes=3):
     x = BatchNormalization()(x)
     x = ReLU()(x)
     x = cbam_block(x)
-
     # Global Pooling
     x = GlobalAveragePooling2D()(x)
-
     # Dense layers
     x = Dense(64, kernel_initializer='he_normal')(x)
     x = BatchNormalization()(x)
     x = ReLU()(x)
     x = Dropout(0.4)(x)
-
     # Output
     output = Dense(n_classes, activation='softmax', kernel_initializer='glorot_normal')(x)
     model = Model(inputs=img_input, outputs=output)
@@ -121,42 +110,33 @@ def unet_small(input_size=(512,512,1)):
     c1 = layers.Conv2D(32,3,activation='relu',padding='same')(inputs)
     c1 = layers.Conv2D(32,3,activation='relu',padding='same')(c1)
     p1 = layers.MaxPooling2D((2,2))(c1)
-
     c2 = layers.Conv2D(64,3,activation='relu',padding='same')(p1)
     c2 = layers.Conv2D(64,3,activation='relu',padding='same')(c2)
     p2 = layers.MaxPooling2D((2,2))(c2)
-
     c3 = layers.Conv2D(128,3,activation='relu',padding='same')(p2)
     c3 = layers.Conv2D(128,3,activation='relu',padding='same')(c3)
     p3 = layers.MaxPooling2D((2,2))(c3)
-
     c4 = layers.Conv2D(256,3,activation='relu',padding='same')(p3)
     c4 = layers.Conv2D(256,3,activation='relu',padding='same')(c4)
     p4 = layers.MaxPooling2D((2,2))(c4)
-
     c5 = layers.Conv2D(512,3,activation='relu',padding='same')(p4)
     c5 = layers.Conv2D(512,3,activation='relu',padding='same')(c5)
-
     u6 = layers.Conv2DTranspose(256,(2,2),strides=(2,2),padding='same')(c5)
     u6 = layers.concatenate([u6, c4])
     c6 = layers.Conv2D(256,3,activation='relu',padding='same')(u6)
     c6 = layers.Conv2D(256,3,activation='relu',padding='same')(c6)
-
     u7 = layers.Conv2DTranspose(128,(2,2),strides=(2,2),padding='same')(c6)
     u7 = layers.concatenate([u7, c3])
     c7 = layers.Conv2D(128,3,activation='relu',padding='same')(u7)
     c7 = layers.Conv2D(128,3,activation='relu',padding='same')(c7)
-
     u8 = layers.Conv2DTranspose(64,(2,2),strides=(2,2),padding='same')(c7)
     u8 = layers.concatenate([u8, c2])
     c8 = layers.Conv2D(64,3,activation='relu',padding='same')(u8)
     c8 = layers.Conv2D(64,3,activation='relu',padding='same')(c8)
-
     u9 = layers.Conv2DTranspose(32,(2,2),strides=(2,2),padding='same')(c8)
     u9 = layers.concatenate([u9, c1])
     c9 = layers.Conv2D(32,3,activation='relu',padding='same')(u9)
     c9 = layers.Conv2D(32,3,activation='relu',padding='same')(c9)
-
     outputs = layers.Conv2D(1,(1,1),activation='sigmoid')(c9)
     model = models.Model(inputs, outputs)
     return model
@@ -164,7 +144,6 @@ def unet_small(input_size=(512,512,1)):
 # -------------------------------
 # STREAMLIT SAFE LOAD FUNCTION
 # -------------------------------
-import streamlit as st
 import os
 
 @st.cache_resource
@@ -176,26 +155,45 @@ def load_models():
         seg_model.load_weights(seg_weights_path)
     else:
         st.error(f"U-Net weights not found at {seg_weights_path}")
-    
+
     # --- CBAM ---
     cbam_path = "cbam/model_cbam.h5"
     if os.path.exists(cbam_path):
         try:
             cbam_model = tf.keras.models.load_model(cbam_path)
         except Exception:
-            # If it fails, assume it's weights-only
             cbam_model = build_cbam_model()
             cbam_model.load_weights(cbam_path)
     else:
         st.error(f"CBAM model file not found at {cbam_path}")
-        cbam_model = build_cbam_model()  # fallback empty model
+        cbam_model = build_cbam_model()
 
     return seg_model, cbam_model
-
 
 # -------------------------------
 # PREDICTION FUNCTION
 # -------------------------------
+def predict_image(img_array, seg_model, cbam_model):
+    labels = ["Normal", "Pneumonia", "Tuberculosis"]
+    gray_input = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    gray_input = cv2.resize(gray_input, (512,512)).astype(np.float32)/255.0
+    gray_input = np.expand_dims(gray_input, axis=(0,-1))
+    mask = seg_model.predict(gray_input)[0]
+    mask = (mask > 0.5).astype(np.float32)
+    masked = gray_input[0] * mask
+    masked_input = np.expand_dims(masked, axis=0)
+    masked_input = np.repeat(masked_input, 3, axis=-1)
+    preds = cbam_model.predict(masked_input)[0]
+    pred_idx = np.argmax(preds)
+    pred_label = labels[pred_idx]
+    confidence = preds[pred_idx]
+    return pred_label, confidence, labels, preds
+
+# -------------------------------
+# LOAD MODELS ONCE
+# -------------------------------
+seg_model, cbam_model = load_models()
+
 # -------------------------------
 # MAIN SECTION
 # -------------------------------
@@ -210,20 +208,15 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
     img_array = np.array(image)
 
-    # Load models
-    seg_model, cbam_model = load_models()
-
     # Prediction
     pred_label, confidence, labels, probs = predict_image(img_array, seg_model, cbam_model)
 
     st.subheader("Prediction Result")
 
-    # Get the highest prediction only
     pred_idx = np.argmax(probs)
     pred_label = labels[pred_idx]
     confidence = probs[pred_idx]
 
-    # Confidence bar for top prediction
     bar_width = int(confidence * 100)
     st.markdown(f"""
     <div style='display:flex; align-items:center; margin-bottom:5px;'>
@@ -233,8 +226,6 @@ if uploaded_file is not None:
         <div style='min-width:70px; font-weight:bold;'>{pred_label} ({confidence*100:.1f}%)</div>
     </div>
     """, unsafe_allow_html=True)
-
-
 else:
     st.info("Upload an X-ray image from the sidebar to begin.")
 
