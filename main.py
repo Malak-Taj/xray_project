@@ -7,10 +7,18 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, Model, Input
 from tensorflow.keras.layers import *
 import os
+# -------------------------------
+# Convert masked array to PIL image for download
+from io import BytesIO
 
-# -------------------------------
+def masked_to_image(masked_array):
+    # Convert float32 [0,1] to uint8 [0,255]
+    masked_img = (masked_array * 255).astype(np.uint8)
+    pil_img = Image.fromarray(masked_img.squeeze())  # remove channel if 1
+    return pil_img
+
+
 # PAGE CONFIGURATION
-# -------------------------------
 st.set_page_config(page_title="X-ray Classifier", layout="wide")
 st.markdown("<h1 style='text-align:center; color:#0A74DA;'>Chest X-ray Deep Learning App</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; font-size:25px;'>AI-powered Classification for lung health insights</p>", unsafe_allow_html=True)
@@ -24,9 +32,8 @@ st.write("""
     - Grad-CAM for explainability
 """)
 
-# -------------------------------
+
 # SIDEBAR
-# -------------------------------
 st.sidebar.header("Upload an X-ray Image")
 
 uploaded_file = st.sidebar.file_uploader(
@@ -45,9 +52,8 @@ with st.sidebar.expander("X-ray Image Tips"):
 progress_text = st.sidebar.empty()
 progress_bar = st.sidebar.progress(0)
 
-# -------------------------------
+
 # CBAM ARCHITECTURE FUNCTION
-# -------------------------------
 def cbam_block(input_feature, ratio=8):
     channel = input_feature.shape[-1]
 
@@ -72,9 +78,8 @@ def cbam_block(input_feature, ratio=8):
 
     return spatial_refined
 
-# -------------------------------
+
 # CBAM MODEL ARCHITECTURE
-# -------------------------------
 def build_cbam_model():
     img_input_ = Input(shape=(512, 512, 3))
     img_ = Resizing(224, 224)(img_input_)
@@ -108,9 +113,7 @@ def build_cbam_model():
     output = Dense(3, activation='softmax', kernel_initializer='glorot_normal')(hidden)
     return Model(inputs=[img_input_], outputs=[output])
 
-# -------------------------------
 # U-NET MODEL FUNCTION
-# -------------------------------
 def unet_small(input_size=(512,512,1)):
     inputs = layers.Input(input_size)
     c1 = layers.Conv2D(32,3,activation='relu',padding='same')(inputs)
@@ -146,9 +149,8 @@ def unet_small(input_size=(512,512,1)):
     outputs = layers.Conv2D(1,(1,1),activation='sigmoid')(c9)
     return models.Model(inputs, outputs)
 
-# -------------------------------
+
 # SAFE LOAD FUNCTION
-# -------------------------------
 @st.cache_resource
 def load_models():
     # --- U-Net ---
@@ -172,9 +174,8 @@ def load_models():
 
     return seg_model, cbam_model
 
-# -------------------------------
+
 # PREDICTION FUNCTION WITH SAFETY
-# -------------------------------
 def predict_image(img_array, seg_model, cbam_model):
     labels = ["Normal", "Pneumonia", "Tuberculosis"]
     try:
@@ -193,25 +194,27 @@ def predict_image(img_array, seg_model, cbam_model):
         st.error(f"Prediction failed: {e}")
         return None, None, labels, None
 
-# -------------------------------
+
 # LOAD MODELS
-# -------------------------------
 seg_model, cbam_model = load_models()
 
-# -------------------------------
 # MAIN APP
-# -------------------------------
 if uploaded_file is not None:
+    # Show progress bar
     for i in range(1, 101):
         progress_text.text(f"Processing: {i}%")
         progress_bar.progress(i)
         time.sleep(0.01)
 
+    # Load the uploaded image
     image = Image.open(uploaded_file).convert("RGB")
     img_array = np.array(image)
 
-    pred_label, confidence, labels, probs = predict_image(img_array, seg_model, cbam_model)
+    # Predict
+    pred_label, confidence, labels, probs, masked = predict_image(img_array, seg_model, cbam_model)
+
     if pred_label is not None:
+        # ---- Prediction Result ----
         st.subheader("Prediction Result")
         bar_width = int(confidence * 100)
         st.markdown(f"""
@@ -222,12 +225,28 @@ if uploaded_file is not None:
             <div style='min-width:70px; font-weight:bold;'>{pred_label} ({confidence*100:.1f}%)</div>
         </div>
         """, unsafe_allow_html=True)
+
+        # ---- Show segmented image ----
+        st.subheader("Segmented Image")
+        masked_pil = masked_to_image(masked)
+        st.image(masked_pil, caption="Segmented X-ray", use_column_width=True)
+
+        # ---- Download segmented image ----
+        buffer = BytesIO()
+        masked_pil.save(buffer, format="PNG")
+        st.download_button(
+            label="Download Segmented Image",
+            data=buffer.getvalue(),
+            file_name="segmented_xray.png",
+            mime="image/png"
+        )
+
 else:
     st.info("Upload an X-ray image from the sidebar to begin.")
 
-# -------------------------------
+
+
 # FOOTER
-# -------------------------------
 st.markdown("---")
 st.markdown("""
 <div style='text-align:center; color:gray; font-size:14px;'>
