@@ -7,9 +7,7 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, Model, Input
 from tensorflow.keras.layers import *
 
-# -------------------------------
 # PAGE CONFIGURATION
-# -------------------------------
 st.set_page_config(page_title="X-ray Classifier", layout="wide")
 st.markdown("<h1 style='text-align:center; color:#0A74DA;'>Chest X-ray Deep Learning App</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; font-size:25px;'>AI-powered Classification for lung health insights</p>", unsafe_allow_html=True)
@@ -23,9 +21,8 @@ st.write("""
     - Grad-CAM for explainability
 """)
 
-# -------------------------------
+
 # SIDEBAR
-# -------------------------------
 st.sidebar.header("Upload an X-ray Image")
 
 uploaded_file = st.sidebar.file_uploader(
@@ -45,66 +42,90 @@ progress_text = st.sidebar.empty()
 progress_bar = st.sidebar.progress(0)
 download_button = st.sidebar.empty()
 
-# -------------------------------
+
 # CBAM ARCHITECTURE FUNCTION
-# -------------------------------
 def cbam_block(input_feature, ratio=8):
     channel = input_feature.shape[-1]
-    # Channel Attention
-    avg_pool = layers.GlobalAveragePooling2D()(input_feature)
-    max_pool = layers.GlobalMaxPooling2D()(input_feature)
-    avg_pool = layers.Dense(channel // ratio, activation='relu')(avg_pool)
-    max_pool = layers.Dense(channel // ratio, activation='relu')(max_pool)
-    avg_pool = layers.Dense(channel, activation='sigmoid')(avg_pool)
-    max_pool = layers.Dense(channel, activation='sigmoid')(max_pool)
-    channel_attention = layers.Add()([avg_pool, max_pool])
-    channel_attention = layers.Activation('sigmoid')(channel_attention)
-    channel_attention = layers.Reshape((1,1,channel))(channel_attention)
-    channel_refined = layers.Multiply()([input_feature, channel_attention])
-    # Spatial Attention
+
+    # ----- Channel Attention -----
+    avg_pool = GlobalAveragePooling2D()(input_feature)
+    max_pool = GlobalMaxPooling2D()(input_feature)
+
+    avg_pool = Dense(channel // ratio, activation='relu')(avg_pool)
+    max_pool = Dense(channel // ratio, activation='relu')(max_pool)
+
+    avg_pool = Dense(channel, activation='sigmoid')(avg_pool)
+    max_pool = Dense(channel, activation='sigmoid')(max_pool)
+
+    channel_attention = Add()([avg_pool, max_pool])
+    channel_attention = Activation('sigmoid')(channel_attention)
+    channel_attention = Reshape((1, 1, channel))(channel_attention)
+    channel_refined = Multiply()([input_feature, channel_attention])
+
+    # ----- Spatial Attention -----
     avg_pool = Lambda(lambda x: tf.reduce_mean(x, axis=-1, keepdims=True))(channel_refined)
     max_pool = Lambda(lambda x: tf.reduce_max(x, axis=-1, keepdims=True))(channel_refined)
-    concat = layers.Concatenate(axis=-1)([avg_pool, max_pool])
-    spatial_attention = layers.Conv2D(1, 7, padding='same', activation='sigmoid')(concat)
-    spatial_refined = layers.Multiply()([channel_refined, spatial_attention])
+    concat = Concatenate(axis=-1)([avg_pool, max_pool])
+
+    spatial_attention = Conv2D(filters=1, kernel_size=7, padding='same', activation='sigmoid')(concat)
+    spatial_refined = Multiply()([channel_refined, spatial_attention])
+
     return spatial_refined
 
-def build_cbam_model(input_shape=(512,512,3), n_classes=3):
-    img_input = Input(shape=input_shape)
-    x = Resizing(224, 224)(img_input)
-    x = BatchNormalization()(x)
-    # Block 1
-    x = Conv2D(32,3,padding='same', kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    x = Conv2D(32,3,padding='same', kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    x = cbam_block(x)
-    x = MaxPool2D()(x)
-    # Block 2
-    x = Conv2D(64,3,padding='same', kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    x = Conv2D(64,3,padding='same', kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    x = cbam_block(x)
-    # Global Pooling
-    x = GlobalAveragePooling2D()(x)
-    # Dense layers
-    x = Dense(64, kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    x = Dropout(0.4)(x)
-    # Output
-    output = Dense(n_classes, activation='softmax', kernel_initializer='glorot_normal')(x)
-    model = Model(inputs=img_input, outputs=output)
-    return model
 
-# -------------------------------
+#  MODEL ARCHITECTURE
+def build_cbam_model():
+    img_input_ = Input(shape=(512, 512, 3))
+    img_ = Resizing(224, 224)(img_input_)
+    img_ = BatchNormalization()(img_)
+
+    # ---- Convolution Block 1 ----
+    hidden = Conv2D(32, 3, padding='same', kernel_initializer='he_normal')(img_)
+    hidden = BatchNormalization()(hidden)
+    hidden = ReLU()(hidden)
+    hidden = Conv2D(32, 3, padding='same', kernel_initializer='he_normal')(hidden)
+    hidden = BatchNormalization()(hidden)
+    hidden = ReLU()(hidden)
+    hidden = MaxPool2D()(hidden)
+
+    # ---- Convolution Block 2 ----
+    hidden = Conv2D(64, 3, padding='same', kernel_initializer='he_normal')(hidden)
+    hidden = BatchNormalization()(hidden)
+    hidden = ReLU()(hidden)
+    hidden = Conv2D(64, 3, padding='same', kernel_initializer='he_normal')(hidden)
+    hidden = BatchNormalization()(hidden)
+    hidden = ReLU()(hidden)
+    hidden = MaxPool2D()(hidden)
+
+    # ---- Convolution Block 3 ----
+    hidden = Conv2D(128, 3, padding='same', kernel_initializer='he_normal', kernel_regularizer=tf.keras.regularizers.l2(1e-4))(hidden)
+    hidden = BatchNormalization()(hidden)
+    hidden = ReLU()(hidden)
+    hidden = Conv2D(128, 3, padding='same', kernel_initializer='he_normal', kernel_regularizer=tf.keras.regularizers.l2(1e-4))(hidden)
+    hidden = BatchNormalization()(hidden)
+    hidden = ReLU()(hidden)
+    hidden = cbam_block(hidden)
+
+    # ---- Global Pooling ----
+    hidden = GlobalAveragePooling2D()(hidden)
+
+    # ---- Dense Layers ----
+    hidden = Dense(128, kernel_initializer='he_normal')(hidden)
+    hidden = BatchNormalization()(hidden)
+    hidden = ReLU()(hidden)
+    hidden = Dropout(0.4)(hidden)
+
+    # ---- Output Layer ----
+    output = Dense(3, activation='softmax', kernel_initializer='glorot_normal')(hidden)
+
+    model_cbam = Model(inputs=[img_input_], outputs=[output])
+    return model_cbam
+
+
+
+
+
 # U-NET MODEL FUNCTION
-# -------------------------------
 def unet_small(input_size=(512,512,1)):
     inputs = layers.Input(input_size)
     c1 = layers.Conv2D(32,3,activation='relu',padding='same')(inputs)
@@ -141,9 +162,8 @@ def unet_small(input_size=(512,512,1)):
     model = models.Model(inputs, outputs)
     return model
 
-# -------------------------------
-# STREAMLIT SAFE LOAD FUNCTION
-# -------------------------------
+
+# SAFE LOAD FUNCTION
 import os
 
 @st.cache_resource
@@ -157,18 +177,20 @@ def load_models():
         st.error(f"U-Net weights not found at {seg_weights_path}")
 
     # --- CBAM ---
-    cbam_path = "models/model_cbam_last.h5"
-    if os.path.exists(cbam_path):
-        cbam_model = tf.keras.models.load_model(cbam_path)
+    cbam_model = build_cbam_model()  # rebuild architecture
+    cbam_weights_path = "models/model_cbam_last.h5"
+    if os.path.exists(cbam_weights_path):
+        try:
+            cbam_model.load_weights(cbam_weights_path)
+        except Exception as e:
+            st.error(f"Failed to load CBAM weights: {e}")
     else:
-        st.error(f"CBAM model file not found at {cbam_path}")
-        cbam_model = build_cbam_model()  # fallback empty model
+        st.error(f"CBAM weights not found at {cbam_weights_path}")
 
     return seg_model, cbam_model
 
-# -------------------------------
+
 # PREDICTION FUNCTION
-# -------------------------------
 def predict_image(img_array, seg_model, cbam_model):
     labels = ["Normal", "Pneumonia", "Tuberculosis"]
     gray_input = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
@@ -185,14 +207,11 @@ def predict_image(img_array, seg_model, cbam_model):
     confidence = preds[pred_idx]
     return pred_label, confidence, labels, preds
 
-# -------------------------------
 # LOAD MODELS ONCE
-# -------------------------------
 seg_model, cbam_model = load_models()
 
-# -------------------------------
+
 # MAIN SECTION
-# -------------------------------
 if uploaded_file is not None:
     # Simulate progress bar
     for i in range(1, 101):
@@ -225,9 +244,8 @@ if uploaded_file is not None:
 else:
     st.info("Upload an X-ray image from the sidebar to begin.")
 
-# -------------------------------
+
 # FOOTER
-# -------------------------------
 st.markdown("---")
 st.markdown(
     """
