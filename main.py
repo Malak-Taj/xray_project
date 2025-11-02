@@ -6,8 +6,11 @@ import cv2
 import tensorflow as tf
 from tensorflow.keras import layers, models, Model, Input
 from tensorflow.keras.layers import *
+import os
 
+# -------------------------------
 # PAGE CONFIGURATION
+# -------------------------------
 st.set_page_config(page_title="X-ray Classifier", layout="wide")
 st.markdown("<h1 style='text-align:center; color:#0A74DA;'>Chest X-ray Deep Learning App</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; font-size:25px;'>AI-powered Classification for lung health insights</p>", unsafe_allow_html=True)
@@ -21,8 +24,9 @@ st.write("""
     - Grad-CAM for explainability
 """)
 
-
+# -------------------------------
 # SIDEBAR
+# -------------------------------
 st.sidebar.header("Upload an X-ray Image")
 
 uploaded_file = st.sidebar.file_uploader(
@@ -40,46 +44,41 @@ with st.sidebar.expander("X-ray Image Tips"):
 
 progress_text = st.sidebar.empty()
 progress_bar = st.sidebar.progress(0)
-download_button = st.sidebar.empty()
 
-
+# -------------------------------
 # CBAM ARCHITECTURE FUNCTION
+# -------------------------------
 def cbam_block(input_feature, ratio=8):
     channel = input_feature.shape[-1]
 
-    # ----- Channel Attention -----
+    # Channel Attention
     avg_pool = GlobalAveragePooling2D()(input_feature)
     max_pool = GlobalMaxPooling2D()(input_feature)
-
     avg_pool = Dense(channel // ratio, activation='relu')(avg_pool)
     max_pool = Dense(channel // ratio, activation='relu')(max_pool)
-
     avg_pool = Dense(channel, activation='sigmoid')(avg_pool)
     max_pool = Dense(channel, activation='sigmoid')(max_pool)
-
     channel_attention = Add()([avg_pool, max_pool])
     channel_attention = Activation('sigmoid')(channel_attention)
     channel_attention = Reshape((1, 1, channel))(channel_attention)
     channel_refined = Multiply()([input_feature, channel_attention])
 
-    # ----- Spatial Attention -----
+    # Spatial Attention
     avg_pool = Lambda(lambda x: tf.reduce_mean(x, axis=-1, keepdims=True))(channel_refined)
     max_pool = Lambda(lambda x: tf.reduce_max(x, axis=-1, keepdims=True))(channel_refined)
     concat = Concatenate(axis=-1)([avg_pool, max_pool])
-
     spatial_attention = Conv2D(filters=1, kernel_size=7, padding='same', activation='sigmoid')(concat)
     spatial_refined = Multiply()([channel_refined, spatial_attention])
 
     return spatial_refined
 
-
-#  MODEL ARCHITECTURE
+# -------------------------------
+# CBAM MODEL ARCHITECTURE
+# -------------------------------
 def build_cbam_model():
     img_input_ = Input(shape=(512, 512, 3))
     img_ = Resizing(224, 224)(img_input_)
     img_ = BatchNormalization()(img_)
-
-    # ---- Convolution Block 1 ----
     hidden = Conv2D(32, 3, padding='same', kernel_initializer='he_normal')(img_)
     hidden = BatchNormalization()(hidden)
     hidden = ReLU()(hidden)
@@ -87,8 +86,6 @@ def build_cbam_model():
     hidden = BatchNormalization()(hidden)
     hidden = ReLU()(hidden)
     hidden = MaxPool2D()(hidden)
-
-    # ---- Convolution Block 2 ----
     hidden = Conv2D(64, 3, padding='same', kernel_initializer='he_normal')(hidden)
     hidden = BatchNormalization()(hidden)
     hidden = ReLU()(hidden)
@@ -96,8 +93,6 @@ def build_cbam_model():
     hidden = BatchNormalization()(hidden)
     hidden = ReLU()(hidden)
     hidden = MaxPool2D()(hidden)
-
-    # ---- Convolution Block 3 ----
     hidden = Conv2D(128, 3, padding='same', kernel_initializer='he_normal', kernel_regularizer=tf.keras.regularizers.l2(1e-4))(hidden)
     hidden = BatchNormalization()(hidden)
     hidden = ReLU()(hidden)
@@ -105,27 +100,17 @@ def build_cbam_model():
     hidden = BatchNormalization()(hidden)
     hidden = ReLU()(hidden)
     hidden = cbam_block(hidden)
-
-    # ---- Global Pooling ----
     hidden = GlobalAveragePooling2D()(hidden)
-
-    # ---- Dense Layers ----
     hidden = Dense(128, kernel_initializer='he_normal')(hidden)
     hidden = BatchNormalization()(hidden)
     hidden = ReLU()(hidden)
     hidden = Dropout(0.4)(hidden)
-
-    # ---- Output Layer ----
     output = Dense(3, activation='softmax', kernel_initializer='glorot_normal')(hidden)
+    return Model(inputs=[img_input_], outputs=[output])
 
-    model_cbam = Model(inputs=[img_input_], outputs=[output])
-    return model_cbam
-
-
-
-
-
+# -------------------------------
 # U-NET MODEL FUNCTION
+# -------------------------------
 def unet_small(input_size=(512,512,1)):
     inputs = layers.Input(input_size)
     c1 = layers.Conv2D(32,3,activation='relu',padding='same')(inputs)
@@ -159,13 +144,11 @@ def unet_small(input_size=(512,512,1)):
     c9 = layers.Conv2D(32,3,activation='relu',padding='same')(u9)
     c9 = layers.Conv2D(32,3,activation='relu',padding='same')(c9)
     outputs = layers.Conv2D(1,(1,1),activation='sigmoid')(c9)
-    model = models.Model(inputs, outputs)
-    return model
+    return models.Model(inputs, outputs)
 
-
+# -------------------------------
 # SAFE LOAD FUNCTION
-import os
-
+# -------------------------------
 @st.cache_resource
 def load_models():
     # --- U-Net ---
@@ -177,8 +160,8 @@ def load_models():
         st.error(f"U-Net weights not found at {seg_weights_path}")
 
     # --- CBAM ---
-    cbam_model = build_cbam_model()  # rebuild architecture
-    cbam_weights_path = "models/model_cbam_last.h5"
+    cbam_model = build_cbam_model()
+    cbam_weights_path = "models/model_cbam_last.weights.h5"  # <-- fixed extension
     if os.path.exists(cbam_weights_path):
         try:
             cbam_model.load_weights(cbam_weights_path)
@@ -189,69 +172,65 @@ def load_models():
 
     return seg_model, cbam_model
 
-
-# PREDICTION FUNCTION
+# -------------------------------
+# PREDICTION FUNCTION WITH SAFETY
+# -------------------------------
 def predict_image(img_array, seg_model, cbam_model):
     labels = ["Normal", "Pneumonia", "Tuberculosis"]
-    gray_input = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    gray_input = cv2.resize(gray_input, (512,512)).astype(np.float32)/255.0
-    gray_input = np.expand_dims(gray_input, axis=(0,-1))
-    mask = seg_model.predict(gray_input)[0]
-    mask = (mask > 0.5).astype(np.float32)
-    masked = gray_input[0] * mask
-    masked_input = np.expand_dims(masked, axis=0)
-    masked_input = np.repeat(masked_input, 3, axis=-1)
-    preds = cbam_model.predict(masked_input)[0]
-    pred_idx = np.argmax(preds)
-    pred_label = labels[pred_idx]
-    confidence = preds[pred_idx]
-    return pred_label, confidence, labels, preds
+    try:
+        gray_input = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        gray_input = cv2.resize(gray_input, (512,512)).astype(np.float32)/255.0
+        gray_input = np.expand_dims(gray_input, axis=(0,-1))
+        mask = seg_model.predict(gray_input)[0]
+        mask = (mask > 0.5).astype(np.float32)
+        masked = gray_input[0] * mask
+        masked_input = np.expand_dims(masked, axis=0)
+        masked_input = np.repeat(masked_input, 3, axis=-1)
+        preds = cbam_model.predict(masked_input)[0]
+        pred_idx = np.argmax(preds)
+        return labels[pred_idx], preds[pred_idx], labels, preds
+    except Exception as e:
+        st.error(f"Prediction failed: {e}")
+        return None, None, labels, None
 
-# LOAD MODELS ONCE
+# -------------------------------
+# LOAD MODELS
+# -------------------------------
 seg_model, cbam_model = load_models()
 
-
-# MAIN SECTION
+# -------------------------------
+# MAIN APP
+# -------------------------------
 if uploaded_file is not None:
-    # Simulate progress bar
     for i in range(1, 101):
         progress_text.text(f"Processing: {i}%")
         progress_bar.progress(i)
         time.sleep(0.01)
 
-    # Load image
     image = Image.open(uploaded_file).convert("RGB")
     img_array = np.array(image)
 
-    # Prediction
     pred_label, confidence, labels, probs = predict_image(img_array, seg_model, cbam_model)
-
-    st.subheader("Prediction Result")
-
-    pred_idx = np.argmax(probs)
-    pred_label = labels[pred_idx]
-    confidence = probs[pred_idx]
-
-    bar_width = int(confidence * 100)
-    st.markdown(f"""
-    <div style='display:flex; align-items:center; margin-bottom:5px;'>
-        <div style='flex:1; background-color:#e0e0e0; height:25px; border-radius:5px; margin-right:10px;'>
-            <div style='width:{bar_width}%; background-color:#0A74DA; height:100%; border-radius:5px;'></div>
+    if pred_label is not None:
+        st.subheader("Prediction Result")
+        bar_width = int(confidence * 100)
+        st.markdown(f"""
+        <div style='display:flex; align-items:center; margin-bottom:5px;'>
+            <div style='flex:1; background-color:#e0e0e0; height:25px; border-radius:5px; margin-right:10px;'>
+                <div style='width:{bar_width}%; background-color:#0A74DA; height:100%; border-radius:5px;'></div>
+            </div>
+            <div style='min-width:70px; font-weight:bold;'>{pred_label} ({confidence*100:.1f}%)</div>
         </div>
-        <div style='min-width:70px; font-weight:bold;'>{pred_label} ({confidence*100:.1f}%)</div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 else:
     st.info("Upload an X-ray image from the sidebar to begin.")
 
-
+# -------------------------------
 # FOOTER
+# -------------------------------
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align:center; color:gray; font-size:14px;'>
-        © 2025 All Rights Reserved
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown("""
+<div style='text-align:center; color:gray; font-size:14px;'>
+    © 2025 All Rights Reserved
+</div>
+""", unsafe_allow_html=True)
