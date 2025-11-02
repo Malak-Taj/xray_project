@@ -8,14 +8,6 @@ from tensorflow.keras import layers, models, Model, Input
 from tensorflow.keras.layers import *
 import os
 # -------------------------------
-# Convert masked array to PIL image for download
-from io import BytesIO
-
-def masked_to_image(masked_array):
-    # Convert float32 [0,1] to uint8 [0,255]
-    masked_img = (masked_array * 255).astype(np.uint8)
-    pil_img = Image.fromarray(masked_img.squeeze())  # remove channel if 1
-    return pil_img
 
 
 # PAGE CONFIGURATION
@@ -198,23 +190,19 @@ def predict_image(img_array, seg_model, cbam_model):
 # LOAD MODELS
 seg_model, cbam_model = load_models()
 
+
 # MAIN APP
 if uploaded_file is not None:
-    # Show progress bar
     for i in range(1, 101):
         progress_text.text(f"Processing: {i}%")
         progress_bar.progress(i)
         time.sleep(0.01)
 
-    # Load the uploaded image
     image = Image.open(uploaded_file).convert("RGB")
     img_array = np.array(image)
 
-    # Predict
-    pred_label, confidence, labels, probs, masked = predict_image(img_array, seg_model, cbam_model)
-
+    pred_label, confidence, labels, probs = predict_image(img_array, seg_model, cbam_model)
     if pred_label is not None:
-        # ---- Prediction Result ----
         st.subheader("Prediction Result")
         bar_width = int(confidence * 100)
         st.markdown(f"""
@@ -226,24 +214,10 @@ if uploaded_file is not None:
         </div>
         """, unsafe_allow_html=True)
 
-        # ---- Show segmented image ----
-        st.subheader("Segmented Image")
-        masked_pil = masked_to_image(masked)
-        st.image(masked_pil, caption="Segmented X-ray", use_column_width=True)
 
-        # ---- Download segmented image ----
-        buffer = BytesIO()
-        masked_pil.save(buffer, format="PNG")
-        st.download_button(
-            label="Download Segmented Image",
-            data=buffer.getvalue(),
-            file_name="segmented_xray.png",
-            mime="image/png"
-        )
 
 else:
     st.info("Upload an X-ray image from the sidebar to begin.")
-
 
 
 # FOOTER
