@@ -159,14 +159,10 @@ def load_models():
     # --- CBAM ---
     cbam_path = "models/model_cbam_last.h5"
     if os.path.exists(cbam_path):
-        try:
-            cbam_model = tf.keras.models.load_model(cbam_path)
-        except Exception:
-            cbam_model = build_cbam_model()
-            cbam_model.load_weights(cbam_path)
+        cbam_model = tf.keras.models.load_model(cbam_path)
     else:
         st.error(f"CBAM model file not found at {cbam_path}")
-        cbam_model = build_cbam_model()
+        cbam_model = build_cbam_model()  # fallback empty model
 
     return seg_model, cbam_model
 
