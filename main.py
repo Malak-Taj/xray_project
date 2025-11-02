@@ -150,14 +150,14 @@ import os
 def load_models():
     # --- U-Net ---
     seg_model = unet_small()
-    seg_weights_path = "U_net/cxr_reg_weights.best.hdf5"
+    seg_weights_path = "models/cxr_reg_weights.best.hdf5"
     if os.path.exists(seg_weights_path):
         seg_model.load_weights(seg_weights_path)
     else:
         st.error(f"U-Net weights not found at {seg_weights_path}")
 
     # --- CBAM ---
-    cbam_path = "cbam/model_cbam.h5"
+    cbam_path = "models/model_cbam_last.h5"
     if os.path.exists(cbam_path):
         try:
             cbam_model = tf.keras.models.load_model(cbam_path)
