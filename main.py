@@ -21,7 +21,8 @@ st.write("""
     **Model Highlights:**
     - CBAM (Convolutional Block Attention Module)
     - Focal Loss for imbalanced datasets
-    - Grad-CAM for explainability
+    - U-Net Segmentation for Lung Region Extraction
+    - CNNs for classification
 """)
 
 
@@ -213,8 +214,6 @@ if uploaded_file is not None:
             <div style='min-width:70px; font-weight:bold;'>{pred_label} ({confidence*100:.1f}%)</div>
         </div>
         """, unsafe_allow_html=True)
-
-
 
 else:
     st.info("Upload an X-ray image from the sidebar to begin.")
