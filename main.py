@@ -196,32 +196,6 @@ def load_models():
 # -------------------------------
 # PREDICTION FUNCTION
 # -------------------------------
-def predict_image(img_array, seg_model, cbam_model):
-    """
-    Preprocess with U-Net and predict with CBAM model.
-    """
-    labels = ["Normal", "Pneumonia", "Tuberculosis"]
-
-    # Preprocess image
-    gray_input = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    gray_input = cv2.resize(gray_input, (512,512)).astype(np.float32)/255.0
-    gray_input = np.expand_dims(gray_input, axis=(0,-1))  # (1,512,512,1)
-
-    # U-Net segmentation
-    mask = seg_model.predict(gray_input)[0]
-    mask = (mask > 0.5).astype(np.float32)
-    masked = gray_input[0] * mask
-    masked_input = np.expand_dims(masked, axis=0)
-    masked_input = np.repeat(masked_input, 3, axis=-1)  # CBAM expects 3 channels
-
-    # CBAM prediction
-    preds = cbam_model.predict(masked_input)[0]
-    pred_idx = np.argmax(preds)
-    pred_label = labels[pred_idx]
-    confidence = preds[pred_idx]
-
-    return pred_label, confidence, labels, preds
-
 # -------------------------------
 # MAIN SECTION
 # -------------------------------
@@ -236,18 +210,8 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
     img_array = np.array(image)
 
-    @st.cache_resource
-    def load_models():
-        # U-Net
-        seg_model = unet_small()
-        seg_model.load_weights("U_net/cxr_reg_weights.best.hdf5")
-
-        # CBAM
-        cbam_model = build_cbam_model()  # build architecture
-        cbam_model.load_weights("cbam/model_cbam.hdf5")  # load weights
-
-        return seg_model, cbam_model
-
+    # Load models
+    seg_model, cbam_model = load_models()
 
     # Prediction
     pred_label, confidence, labels, probs = predict_image(img_array, seg_model, cbam_model)
@@ -269,6 +233,7 @@ if uploaded_file is not None:
         <div style='min-width:70px; font-weight:bold;'>{pred_label} ({confidence*100:.1f}%)</div>
     </div>
     """, unsafe_allow_html=True)
+
 
 else:
     st.info("Upload an X-ray image from the sidebar to begin.")
