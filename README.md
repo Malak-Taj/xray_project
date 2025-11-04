@@ -18,8 +18,6 @@
   - (https://joonyoung-cv.github.io/assets/paper/18_eccv_cbam.pdf)
 * Callbacks and Techniques:
   - EarlyStopping, ReduceRLOnPlateau and Augmentation
-* Transfer Learning Using DenseNet121 Pretrained Model
-* Fine Tuning For DenseNet121 Model
 * Transfer Learning Using EfficientNetB0 Pretrained Model
 * Fine Tuning For EfficientNetB0 Model
 * Evaluate The Best Model On the Test Data
